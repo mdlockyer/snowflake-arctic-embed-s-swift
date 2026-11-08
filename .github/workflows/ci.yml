@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ["**.md", "LICENSE"]
+  pull_request:
+    paths-ignore: ["**.md", "LICENSE"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  WEIGHTS_CACHE_KEY: weights-e596f507-v1
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Host CPU features
+        run: |
+          if [ "$RUNNER_OS" = macOS ]; then sysctl -a | grep -E 'hw.optional.arm.FEAT_(DotProd|I8MM|SME)' || true
+          else grep -m1 -E '^(flags|Features)' /proc/cpuinfo; fi
+      - name: Test
+        run: swift test -c release
+      - name: Benchmark (quick)
+        run: |
+          swift run -c release arctic-embed model --quick | tee bench.txt
+          { echo "### Benchmark (\`--quick\`, ${{ matrix.os }})"; echo '```'; cat bench.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+  convert:
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cache FP32 checkpoint
+        id: weights
+        uses: actions/cache@v4
+        with:
+          path: weights
+          key: ${{ env.WEIGHTS_CACHE_KEY }}
+      - name: Download FP32 checkpoint
+        if: steps.weights.outputs.cache-hit != 'true'
+        run: scripts/download_weights.sh
+      - name: Committed pack matches conversion
+        run: swift test -c release --filter testCommittedPackMatchesConversionIfCheckpointAvailable
