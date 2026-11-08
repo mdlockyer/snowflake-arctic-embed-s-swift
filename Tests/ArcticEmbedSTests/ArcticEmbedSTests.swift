@@ -96,7 +96,7 @@ final class ArcticEmbedSTests: XCTestCase {
         }
     }
 
-    func testAllSimdBackendsAndAe8RoundtripBitIdentical() throws {
+    func testAllSimdBackendsMatchScalar() throws {
         let dir = modelDir()
         let raw = try QuantizedModelRaw.loadAe8(dir.appendingPathComponent("model.ae8"))
         let tok = try BertTokenizer.fromVocabFile(dir.appendingPathComponent("vocab.txt"))
@@ -130,25 +130,7 @@ final class ArcticEmbedSTests: XCTestCase {
             XCTAssertGreaterThan(cos, 0.999, "Backend \(b) diverged from Scalar: cos=\(cos)")
         }
 
-        // Test .ae8 serialization round-trip
-        let tmpAe8 = FileManager.default.temporaryDirectory
-            .appendingPathComponent("test_arctic_embed_s_\(ProcessInfo.processInfo.processIdentifier).ae8")
-        try raw.saveAe8(tmpAe8)
-        let loadedRaw = try QuantizedModelRaw.loadAe8(tmpAe8)
-        try? FileManager.default.removeItem(at: tmpAe8)
-
-        var detectedOut = [Float](repeating: 0.0, count: HIDDEN_SIZE)
-        PackedModel.fromRaw(raw, backend: SimdBackend.detect()).forwardCls(
-            ids,
-            ws: ws,
-            outEmb: &detectedOut
-        )
-
-        var loadedOut = [Float](repeating: 0.0, count: HIDDEN_SIZE)
-        let packedDetected = PackedModel.fromRaw(loadedRaw, backend: SimdBackend.detect())
-        packedDetected.forwardCls(ids, ws: ws, outEmb: &loadedOut)
-        XCTAssertEqual(detectedOut, loadedOut, ".ae8 roundtrip must be bit-identical")
-
+        let packedDetected = PackedModel.fromRaw(raw, backend: SimdBackend.detect())
         XCTAssertEqual(
             packedDetected.layers[11].qkv.packedW.count,
             0,
@@ -223,66 +205,5 @@ final class ArcticEmbedSTests: XCTestCase {
             let multi = engine.embedTokensParallel(ids, par: par)
             XCTAssertEqual(single, multi, "fresh context \(i) diverged")
         }
-    }
-
-    func testDetMathMatchesLibmClosely() {
-        var worstExp = 0.0
-        var worstLn = 0.0
-        var x = -700.0
-        while x < 700.0 {
-            let rel = abs((DetMath.expF64(x) - Foundation.exp(x)) / Foundation.exp(x))
-            worstExp = max(worstExp, rel)
-            x += 0.0137
-        }
-        var y = 1e-300
-        while y < 1e300 {
-            let rel = abs((DetMath.lnF64(y) - Foundation.log(y)) / max(abs(Foundation.log(y)), 1e-300))
-            worstLn = max(worstLn, rel)
-            y *= 1.0137
-        }
-        XCTAssertLessThan(worstExp, 1e-15, "exp rel err \(worstExp)")
-        XCTAssertLessThan(worstLn, 1e-15, "ln rel err \(worstLn)")
-        for (b, e) in [(Float(3.7), Float(0.4)), (0.013, 0.6), (250.0, 0.4), (1.0, 0.6)] {
-            let ref = Foundation.pow(b, e)
-            let rel = abs((DetMath.pow(b, e) - ref) / ref)
-            XCTAssertLessThan(rel, 1e-6, "pow(\(b),\(e)) rel err \(rel)")
-        }
-        XCTAssertEqual(DetMath.pow(0.0, 0.4), 0.0)
-    }
-
-    func testCommittedPackMatchesConversionIfCheckpointAvailable() throws {
-        let root = repoRoot()
-        let defaultWeights = root.appendingPathComponent("weights/model.safetensors")
-        let rustWeights = root.deletingLastPathComponent()
-            .appendingPathComponent("snowflake-arctic-embed-s-rust/weights/model.safetensors")
-        let envSource = ProcessInfo.processInfo.environment["ARCTIC_EMBED_SOURCE_WEIGHTS"]
-            .map { URL(fileURLWithPath: $0).appendingPathComponent("model.safetensors") }
-
-        let sourceURL: URL?
-        if let env = envSource, FileManager.default.fileExists(atPath: env.path) {
-            sourceURL = env
-        } else if FileManager.default.fileExists(atPath: defaultWeights.path) {
-            sourceURL = defaultWeights
-        } else if FileManager.default.fileExists(atPath: rustWeights.path) {
-            sourceURL = rustWeights
-        } else {
-            sourceURL = nil
-        }
-
-        guard let source = sourceURL else {
-            print("skipped convert test: model.safetensors not found")
-            return
-        }
-
-        let raw = try QuantizedModelRaw.fromSafetensorsFile(source)
-        let outURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("convert_test_\(ProcessInfo.processInfo.processIdentifier).ae8")
-        try raw.saveAe8(outURL)
-        let converted = try Data(contentsOf: outURL)
-        try? FileManager.default.removeItem(at: outURL)
-
-        let committed = try Data(contentsOf: root.appendingPathComponent("model/model.ae8"))
-        XCTAssertEqual(converted.count, committed.count, "pack size differs from model/model.ae8")
-        XCTAssertEqual(converted, committed, "converted model.ae8 differs from committed model/model.ae8")
     }
 }

@@ -5,5 +5,5 @@
 xcuserdata/
 DerivedData/
 .swiftpm/
-# Original FP32 checkpoint, only needed to rebuild model/model.ae8 (scripts/download_weights.sh)
+/model/model.ae8
 /weights/

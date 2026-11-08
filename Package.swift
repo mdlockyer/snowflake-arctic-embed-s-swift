@@ -16,10 +16,6 @@ let package = Package(
             name: "arctic-embed",
             targets: ["arctic-embed"]
         ),
-        .executable(
-            name: "arctic-embed-convert",
-            targets: ["arctic-embed-convert"]
-        ),
     ],
     targets: [
         .target(
@@ -30,13 +26,6 @@ let package = Package(
         ),
         .executableTarget(
             name: "arctic-embed",
-            dependencies: ["ArcticEmbedS"],
-            swiftSettings: [
-                .swiftLanguageMode(.v5),
-            ]
-        ),
-        .executableTarget(
-            name: "arctic-embed-convert",
             dependencies: ["ArcticEmbedS"],
             swiftSettings: [
                 .swiftLanguageMode(.v5),

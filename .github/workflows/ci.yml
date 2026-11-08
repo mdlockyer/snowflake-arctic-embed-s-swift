@@ -16,7 +16,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  WEIGHTS_CACHE_KEY: weights-e596f507-v1
+  MODEL_CACHE_KEY: ae8-v1.0.0-d68b00ac
 
 jobs:
   test:
@@ -28,6 +28,14 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+      - name: Cache .ae8 model pack
+        id: model
+        uses: actions/cache@v4
+        with:
+          path: model/model.ae8
+          key: ${{ env.MODEL_CACHE_KEY }}
+      - name: Fetch .ae8 model pack
+        run: scripts/fetch_model.sh
       - name: Host CPU features
         run: |
           if [ "$RUNNER_OS" = macOS ]; then sysctl -a | grep -E 'hw.optional.arm.FEAT_(DotProd|I8MM|SME)' || true
@@ -38,20 +46,3 @@ jobs:
         run: |
           swift run -c release arctic-embed model --quick | tee bench.txt
           { echo "### Benchmark (\`--quick\`, ${{ matrix.os }})"; echo '```'; cat bench.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
-
-  convert:
-    runs-on: macos-15
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-      - name: Cache FP32 checkpoint
-        id: weights
-        uses: actions/cache@v4
-        with:
-          path: weights
-          key: ${{ env.WEIGHTS_CACHE_KEY }}
-      - name: Download FP32 checkpoint
-        if: steps.weights.outputs.cache-hit != 'true'
-        run: scripts/download_weights.sh
-      - name: Committed pack matches conversion
-        run: swift test -c release --filter testCommittedPackMatchesConversionIfCheckpointAvailable
