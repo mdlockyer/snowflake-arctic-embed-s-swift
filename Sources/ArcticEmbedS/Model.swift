@@ -658,24 +658,25 @@ extension PackedModel {
             )
 
             #if arch(arm64)
-            if useSme && totalTokens >= 32 {
-                ws.segRanges.withUnsafeBufferPointer { segBuf in
+            for b in 0..<bCount {
+                let (sStart, sEnd) = segBounds[b]
+                let sLen = sEnd - sStart
+                if useSme && sLen >= 16 {
+                    // Match forwardCls exactly: SME attention is selected per sequence, never
+                    // from the combined pack length. Packing each segment separately also keeps
+                    // its V quantization scales independent of every other sequence in the pack.
                     attentionMultiheadSme(
-                        seqLen: totalTokens,
-                        qkvBuf: ws.qkvBuf.ptr,
+                        seqLen: sLen,
+                        qkvBuf: ws.qkvBuf.ptr.advanced(by: sStart * 3 * HIDDEN_SIZE),
                         qTF32: ws.smeQT.ptr,
                         kTF32: ws.smeKT.ptr,
                         vContigF32: ws.vHead.ptr,
                         scoresBlk: ws.smeScoresBlk.ptr,
                         pTF32: ws.smePT.ptr,
-                        attnCtx: ws.attnCtx.ptr,
-                        segRanges: segBuf
+                        attnCtx: ws.attnCtx.ptr.advanced(by: sStart * HIDDEN_SIZE),
+                        segRanges: nil
                     )
-                }
-            } else {
-                for b in 0..<bCount {
-                    let (sStart, sEnd) = segBounds[b]
-                    let sLen = sEnd - sStart
+                } else {
                     for h in 0..<NUM_HEADS {
                         let hOff = h * HEAD_DIM
                         extractKvHead32(
